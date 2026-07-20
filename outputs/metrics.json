@@ -1,115 +1,55 @@
 {
-  "best_model": "Gradient Boosting",
-  "accuracy": 0.934261698657634,
-  "f1_weighted": 0.9330760713937103,
-  "precision_weighted": 0.9327952417970167,
-  "recall_weighted": 0.934261698657634,
-  "all_models": {
-    "Random Forest": {
-      "accuracy": 0.9326935139882072,
-      "f1_weighted": 0.9315211915838592,
-      "precision_weighted": 0.9319025502171518,
-      "recall_weighted": 0.9326935139882072
+  "version": "XGBoost + OHE(estado+transicion) + 5-fold CV (AUTOMATA)",
+  "dataset": "datos/08_solo_pregrado_automata_corregido_validado_v2.xlsx",
+  "n_filas": 97189,
+  "n_estudiantes": 12786,
+  "n_features": 37,
+  "cv_results": {
+    "n_splits": 5,
+    "strategy": "StratifiedGroupKFold (agrupado por ID)",
+    "accuracy": {
+      "mean": 0.9998,
+      "std": 0.0001
     },
-    "Gradient Boosting": {
-      "accuracy": 0.934261698657634,
-      "f1_weighted": 0.9330760713937103,
-      "precision_weighted": 0.9327952417970167,
-      "recall_weighted": 0.934261698657634
+    "f1_macro": {
+      "mean": 0.9999,
+      "std": 0.0
     },
-    "Logistic Regression": {
-      "accuracy": 0.6563793752352277,
-      "f1_weighted": 0.6911005979214745,
-      "precision_weighted": 0.7823125904515232,
-      "recall_weighted": 0.6563793752352277
+    "f1_weighted": {
+      "mean": 0.9998,
+      "std": 0.0001
     },
-    "XGBoost": {
-      "accuracy": 0.933446242629532,
-      "f1_weighted": 0.9317384177153034,
-      "precision_weighted": 0.9318044270502901,
-      "recall_weighted": 0.933446242629532
-    }
-  },
-  "classification_report": {
-    "Continuo regular": {
-      "precision": 0.9674272627025193,
-      "recall": 0.9737044309741313,
-      "f1-score": 0.9705556973874564,
-      "support": 11713.0
-    },
-    "Grado": {
-      "precision": 0.8365906623235614,
-      "recall": 0.7708854427213607,
-      "f1-score": 0.8023952095808383,
-      "support": 1999.0
-    },
-    "PAP": {
-      "precision": 0.878001921229587,
-      "recall": 0.9058473736372646,
-      "f1-score": 0.8917073170731707,
-      "support": 1009.0
-    },
-    "PAT": {
-      "precision": 0.8736559139784946,
-      "recall": 0.9530791788856305,
-      "f1-score": 0.9116409537166901,
-      "support": 341.0
-    },
-    "PFU": {
-      "precision": 0.9104803493449781,
-      "recall": 0.9477272727272728,
-      "f1-score": 0.9287305122494433,
-      "support": 440.0
-    },
-    "Primera vez en una carrera": {
-      "precision": 0.52,
-      "recall": 0.37572254335260113,
-      "f1-score": 0.436241610738255,
-      "support": 173.0
-    },
-    "Recuperación académica": {
-      "precision": 0.7206349206349206,
-      "recall": 0.850187265917603,
-      "f1-score": 0.7800687285223368,
-      "support": 267.0
-    },
-    "accuracy": 0.934261698657634,
-    "macro avg": {
-      "precision": 0.8152558614591515,
-      "recall": 0.8253076440308377,
-      "f1-score": 0.8173342898954559,
-      "support": 15942.0
-    },
-    "weighted avg": {
-      "precision": 0.9327952417970167,
-      "recall": 0.934261698657634,
-      "f1-score": 0.9330760713937103,
-      "support": 15942.0
-    }
-  },
-  "target_names": [
-    "Continuo regular",
-    "Grado",
-    "PAP",
-    "PAT",
-    "PFU",
-    "Primera vez en una carrera",
-    "Recuperación académica"
-  ],
-  "feature_names": [
-    "ESTADO_ACTUAL_ENC",
-    "NIVEL_RIESGO_ESTADO",
-    "PROMEDIO",
-    "PROMEDIO_ACUMULADO",
-    "NRO_CURSOS_APROBADOS",
-    "CREDITOS_APROVADOS",
-    "PERIODOS_TRANSCURRIDOS",
-    "PROGRAMA_ENC",
-    "RIESGO_EXCLUSION",
-    "TUVO_RIESGO_EXCLUSION",
-    "PORCENTAJE_CREDITOS_GRADO",
-    "PORCENTAJE_MATERIAS_GRADO"
-  ],
-  "n_train": 63767,
-  "n_test": 15942
+    "per_fold": [
+      {
+        "fold": 1,
+        "accuracy": 0.9997925095964312,
+        "f1_macro": 0.9999246037190086,
+        "f1_weighted": 0.9997925095964312
+      },
+      {
+        "fold": 2,
+        "accuracy": 0.9997462701715214,
+        "f1_macro": 0.9999069958563399,
+        "f1_weighted": 0.9997463202534915
+      },
+      {
+        "fold": 3,
+        "accuracy": 0.9998478393183201,
+        "f1_macro": 0.9999437871414917,
+        "f1_weighted": 0.9998478494951544
+      },
+      {
+        "fold": 4,
+        "accuracy": 0.999842594050055,
+        "f1_macro": 0.99994327701823,
+        "f1_weighted": 0.9998426043464375
+      },
+      {
+        "fold": 5,
+        "accuracy": 0.999897066392177,
+        "f1_macro": 0.9999621023416951,
+        "f1_weighted": 0.999897066392177
+      }
+    ]
+  }
 }

@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# Legacy outputs
+outputs_v2/
+outputs_v3/
+outputs_v4/
+outputs_v5/
+outputs_v5.rar
+outputs_v6/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temporary training scripts
+entrenar_numerico.py
