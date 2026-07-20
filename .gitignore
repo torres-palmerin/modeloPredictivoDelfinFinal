@@ -1,3 +1,6 @@
+# Datasets (private university data)
+datos/*.xlsx
+
 # Virtual environment
 .venv/
 
