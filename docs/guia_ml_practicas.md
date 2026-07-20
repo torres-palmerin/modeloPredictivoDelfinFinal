@@ -22,7 +22,7 @@ Data leakage ocurre cuando informacion del futuro o del target se filtra a las f
 - Sin variacion entre folds
 - Las features del automata dominan la importancia
 
-**Solucion aplicada:** Enfoque dual — modelo "Automata" como diagnostico, modelo "Numerico" como realidad.
+**Solucion aplicada:** Enfoque dual e hibrido — modelo "Automata" como diagnostico, modelo "Hibrido" como punto intermedio (estado actual sin transicion), modelo "Numerico" como realidad.
 
 ### 1.3 Tipo: Leakage por Agrupacion
 

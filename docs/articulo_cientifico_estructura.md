@@ -2,9 +2,9 @@
 
 ## Titulo Propuesto
 
-**Modelo Predictivo Dual XGBoost para Trayectorias Academicas Universitarias: Analisis de Data Leakage en Automatas Finitos Deterministas**
+**Modelo Predictivo XGBoost con Enfoque Dual e Hibrido para Trayectorias Academicas Universitarias: Analisis de Data Leakage en Automatas Finitos Deterministas**
 
-*XGBoost Dual Predictive Model for University Academic Trajectories: Analysis of Data Leakage in Deterministic Finite Automata*
+*XGBoost Predictive Model with Dual and Hybrid Approach for University Academic Trajectories: Analysis of Data Leakage in Deterministic Finite Automata*
 
 ---
 
@@ -14,11 +14,11 @@
 
 **Problema:** Modelos predictivos que incorporan el estado de un automata finito como feature pueden sufrir data leakage cuando el automata es determinista, generando accuracy artificialmente perfecto (~100%) que no refleja la capacidad predictiva real.
 
-**Metodologia:** Se propone un enfoque dual con dos modelos XGBoost: (1) Modelo "Automata" con 37 features (8 numericas + 2 booleanas + 13 OHE estado + 14 OHE transicion), y (2) Modelo "Numerico" con 9 features (8 numericas + 1 booleana), sin features del automata. Se emplea validacion cruzada de 5 pliegues con StratifiedGroupKFold agrupado por estudiante y SMOTE para balanceo de clases. Dataset: 97,189 registros de 12,786 estudiantes de pregrado (2015-2024) de la Universidad Tecnologica de Bolivar.
+**Metodologia:** Se propone un enfoque dual mas un modelo hibrido XGBoost: (1) Modelo "Automata" con 37 features (8 numericas + 2 booleanas + 13 OHE estado + 14 OHE transicion), (2) Modelo "Numerico" con 9 features (8 numericas + 1 booleana), y (3) Modelo "Hibrido" con 23 features (8 numericas + 2 booleanas + 13 OHE estado, sin OHE transicion). El modelo Hibrido representa un punto intermedio que incorpora informacion del estado actual (sin la transicion determinista), reduciendo parcialmente el leakage. Se emplea validacion cruzada de 5 pliegues con StratifiedGroupKFold agrupado por estudiante y SMOTE para balanceo de clases. Dataset: 97,189 registros de 12,786 estudiantes de pregrado (2015-2024) de la Universidad Tecnologica de Bolivar.
 
-**Resultados:** El modelo Automata alcanza F1-Macro = 0.9999 (leakage), mientras que el modelo Numerico obtiene F1-Macro = 0.5217 (realista). El gap de 0.4782 representa cuantitativamente la informacion contenida en el automata. El modelo Numerico identifica PROMEDIO_ACUMULADO, ORDEN_AUTOMATA y PORCENTAJE_CREDITOS_GRADO como las 3 features mas importantes.
+**Resultados:** El modelo Automata alcanza F1-Macro = 0.9999 (leakage), el modelo Hibrido obtiene F1-Macro = 0.8370 (estado sin transicion, gap de 0.1629 respecto al Automata), y el modelo Numerico F1-Macro = 0.5217 (realista). El gap Automata-Numerico de 0.4782 representa cuantitativamente la informacion contenida en el automata completo; el gap Hibrido-Numerico de 0.3153 representa la informacion que aporta solo el estado actual. El modelo Numerico identifica PROMEDIO_ACUMULADO, ORDEN_AUTOMATA y PORCENTAJE_CREDITOS_GRADO como las 3 features mas importantes.
 
-**Conclusiones:** El enfoque dual permite diagnosticar y cuantificar el data leakage estructural en modelos con automatas deterministas. El modelo Numerico, aunque con rendimiento modesto, representa una estimacion realista del limite superior de prediccion basada solo en datos academicos historicos.
+**Conclusiones:** El enfoque dual mas hibrido permite diagnosticar, cuantificar y descomponer el data leakage estructural en modelos con automatas deterministas. El modelo Numerico representa una estimacion realista del limite superior de prediccion basada solo en datos academicos historicos, mientras que el Hibrido demuestra que incluir el estado actual como feature categorica (sin la transicion) ofrece una mejora sustancial (gap de 0.3153 vs. 0.4782 del automata completo), representando un punto de equilibrio entre leakage y poder predictivo.
 
 **Palabras clave:** Prediccion de trayectorias academicas, XGBoost, automata finito, data leakage, SMOTE, desercion universitaria
 
@@ -40,7 +40,7 @@ La pregunta de investigacion es: **?Cual es la capacidad predictiva real de un m
 
 ### 2.3 Objetivos
 
-1. Disenar un modelo predictivo dual que permita cuantificar el data leakage estructural
+1. Disenar un enfoque predictivo dual e hibrido que permita cuantificar y descomponer el data leakage estructural
 2. Implementar un pipeline robusto con validacion cruzada estratificada por estudiante
 3. Desarrollar una aplicacion interactiva para simulacion de trayectorias
 4. Proporcionar metricas realistas del poder predictivo de variables academicas
@@ -183,7 +183,7 @@ Para cada modelo (Automata, Numerico):
 ### 4.6 Aplicacion Streamlit y Guardrails
 
 Arquitectura de la aplicacion:
-- Tab 1: Prediccion individual con dos modos:
+- Tab 1: Prediccion individual con tres modos (Real, Hibrido checkbox, What-If):
   - **Prediccion real (Modelo Numerico):** solo datos academicos, sin estado ni transicion
   - **Simulacion What-If (Modelo Automata):** explorador de escenarios. El usuario selecciona el estado actual y la app evalua automaticamente todas las transiciones posibles desde ese estado, mostrando una tabla de "Transicion → Evento → Estado resultante → Confianza". Tambien permite seleccionar una transicion especifica para analisis detallado con distribucion de probabilidades.
 - Tab 2: Prediccion masiva (batch) via CSV/Excel en ambos modos
@@ -291,7 +291,7 @@ El gap de 0.4782 en F1-Macro entre ambos modelos demuestra cuantitativamente el 
 
 ### 6.2 Valor del Enfoque Dual
 
-La contribucion metodologica principal es el enfoque dual:
+La contribucion metodologica principal es el enfoque dual e hibrido:
 - **Modelo de referencia** (Automata): Verifica que el pipeline de entrenamiento es correcto (si no alcanzara ~100%, habria un bug)
 - **Modelo realista** (Numerico): Proporciona estimaciones utiles para intervenciones reales
 

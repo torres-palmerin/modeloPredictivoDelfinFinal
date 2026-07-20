@@ -87,7 +87,7 @@ Usar commits semanticos (Conventional Commits):
 
 | Tipo | Uso | Ejemplo |
 |---|---|---|
-| `feat` | Nueva funcionalidad | `feat: add dual model training (automata + numeric)` |
+| `feat` | Nueva funcionalidad | `feat: add hybrid model training (automata + hybrid + numeric)` |
 | `fix` | Correccion de bug | `fix: map integer predictions to class names` |
 | `chore` | Mantenimiento | `chore: remove private datasets from repo` |
 | `docs` | Documentacion | `docs: add scientific article structure guide` |
@@ -169,7 +169,7 @@ Evitar parametros hardcodeados. Usar archivos de configuracion (YAML/JSON):
 ```yaml
 # config.yaml
 model:
-  name: xgboost_dual
+  name: xgboost_triple
   params:
     n_estimators: 300
     learning_rate: 0.05
