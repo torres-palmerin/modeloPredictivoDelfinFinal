@@ -180,13 +180,45 @@ Para cada modelo (Automata, Numerico):
 - **Matriz de confusion:** Normalizada por fila (proporciones)
 - **Feature Importance:** Ganancia media de cada feature en los arboles
 
-### 4.6 Aplicacion Streamlit
+### 4.6 Aplicacion Streamlit y Guardrails
 
 Arquitectura de la aplicacion:
-- Tab 1: Prediccion individual con selector de modelo
-- Tab 2: Prediccion masiva (batch) via CSV/Excel
+- Tab 1: Prediccion individual con dos modos:
+  - **Prediccion real (Modelo Numerico):** solo datos academicos, sin estado ni transicion
+  - **Simulacion What-If (Modelo Automata):** explorador de escenarios. El usuario selecciona el estado actual y la app evalua automaticamente todas las transiciones posibles desde ese estado, mostrando una tabla de "Transicion → Evento → Estado resultante → Confianza". Tambien permite seleccionar una transicion especifica para analisis detallado con distribucion de probabilidades.
+- Tab 2: Prediccion masiva (batch) via CSV/Excel en ambos modos
 - Tab 3: Metricas comparativas lado a lado
-- Sidebar: Resumen de modelos y pasos de ejecucion
+- Sidebar: Resumen de modos y pasos de ejecucion
+
+#### Guardrails (Reglas de Negocio Post-Prediccion)
+
+Se implementaron dos reglas de negocio que se aplican sobre las probabilidades de salida del modelo, asegurando que las predicciones respeten las politicas institucionales:
+
+```python
+def aplicar_guardrails(probas, ppa, cursos_acum, creditos_acum):
+    # Regla 1: Override de Grado
+    if cursos_acum > 55 and creditos_acum > 150:
+        for k in probas: probas[k] = 0.0
+        probas['Grado'] = 1.0
+        return probas
+
+    # Regla 2: Filtro de sancion academica
+    if ppa >= 3.0:
+        for est in {'PAP', 'PAT', 'PFU', 'Recuperacion academica'}:
+            if est in probas: probas[est] = 0.0
+
+    # Renormalizar
+    total = sum(probas.values())
+    if total > 0:
+        for k in probas: probas[k] /= total
+    return probas
+```
+
+**Regla 1 — Override de Grado:** Si el estudiante supera los umbrales acumulados de 55 cursos y 150 creditos aprobados, institucionalmente debe estar en estado de graduacion. Esta regla existia en el entrenamiento como override del target, y se refuerza en inferencia.
+
+**Regla 2 — Filtro de sancion por PPA:** Si el promedio ponderado acumulado (PPA) es ≥ 3.0 (escala 0-5), es institucionalmente imposible que el estudiante sea sancionado academicamente. Las probabilidades de los estados PAP, PAT, PFU y Recuperacion academica se anulan y las probabilidades restantes se renormalizan.
+
+Estos guardrails actuan como **mascaras de estado** que restringen el espacio de salida del modelo a solo las transiciones institucionalmente posibles, mejorando la plausibilidad de las predicciones.
 
 La aplicacion carga los modelos al iniciar via `@st.cache_resource` y nunca entrena en runtime.
 

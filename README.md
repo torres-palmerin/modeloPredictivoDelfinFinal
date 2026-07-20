@@ -7,10 +7,12 @@ Universidad Tecnologica de Bolivar — Cartagena, Colombia
 
 ## Descripcion
 
-Sistema predictivo dual basado en XGBoost que anticipa la transicion del estado academico de estudiantes de pregrado. Implementa dos modelos:
+Sistema predictivo dual basado en XGBoost que anticipa la transicion del estado academico de estudiantes de pregrado. Dos modos de uso:
 
-- **Modelo Automata** (~100% F1-Macro): incluye OHE del estado y transicion del automata como features. Sirve como referencia y diagnostico de data leakage estructural.
-- **Modelo Numerico** (~52% F1-Macro): predice solo con datos academicos (PPA, creditos, cursos). Representa la capacidad predictiva realista.
+- **Prediccion real (Modelo Numerico)** (~52% F1-Macro): predictivo solo con datos academicos (PPA, creditos, cursos, programa). Sin conocimiento del automata. Resultados realistas.
+- **Simulacion What-If (Modelo Automata)** (~100% F1-Macro): explorador de escenarios basado en el automata finito. Permite simular el efecto de diferentes transiciones sobre el estado academico.
+
+Incluye **guardrails** (reglas de negocio) post-prediccion: filtro de sancion por PPA y override por umbrales de grado.
 
 ## Requisitos
 
@@ -41,13 +43,19 @@ py -3.10 -m streamlit run app.py
 ## App Streamlit
 
 Tres pestanas:
-1. **Prediccion Individual** — formulario con selector de modelo
-2. **Prediccion Masiva** — subir CSV/Excel con prediccion batch
+1. **Prediccion Individual** — dos modos:
+   - *Prediccion real*: solo datos academicos, sin estado/transicion
+   - *Simulacion What-If*: seleccionas estado + transicion (o todas las posibles) y ves escenarios
+2. **Prediccion Masiva** — subir CSV/Excel con prediccion batch en ambos modos
 3. **Metricas** — comparacion lado a lado de ambos modelos
+
+### Guardrails aplicados
+- PPA >= 3.0 → se anulan automaticamente estados de sancion (PAP, PAT, PFU, Recuperacion)
+- CURSOS > 55 y CREDITOS > 150 → resultado forzado a "Grado"
 
 ## Papel Cientifico
 
-La documentacion para el articulo academico esta en `docs/articulo_cientifico_estructura.md`, incluyendo metodologia detallada, resultados, discusion sobre data leakage, y referencias.
+La documentacion para el articulo academico esta en `docs/articulo_cientifico_estructura.md`, incluyendo metodologia detallada, resultados, discusion sobre data leakage, guardrails, y referencias.
 
 ## Datos
 

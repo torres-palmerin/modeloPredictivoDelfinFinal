@@ -123,6 +123,26 @@ TRANS_DESCRIPCIONES = {
     "n": "Ingreso inicial", "r": "Transferencia interna", "s": "Transferencia externa",
 }
 
+TRANS_POSIBLES = {
+    'Continuo regular': ['a', 'b', 'c', 'd', 'e', 'f', 'k', 'r', 's'],
+    'PAP': ['b', 'a', 'e', 'd', 'k', 'f', 'r', 's'],
+    'PAT': ['e', 'a', 'd', 'k', 'f', 'r', 's'],
+    'PFU': ['k', 'g', 'd'],
+    'Grado': ['c'],
+    'Reingreso': ['h', 'a', 'b', 'e', 'd', 'k'],
+    'Reinicio': ['j', 'i'],
+    'Transferencia interna': ['f'],
+    'Transferencia externa': ['s'],
+    'Exclusión': ['d'],
+    'Final': ['d'],
+    'Aspirante inscrito': ['n'],
+    'Primera vez en una carrera': ['n', 'a', 'b', 'e', 'd', 'k'],
+    'Recuperación académica': ['e', 'a', 'b', 'd', 'k', 'f', 'r', 's'],
+}
+
+ESTADOS_SANCION = {'PAP', 'PAT', 'PFU', 'Recuperación académica'}
+PPA_SANCION_MIN = 3.0
+
 UMBRAL_CURSOS = 55
 UMBRAL_CREDITOS = 150
 
@@ -152,6 +172,28 @@ PROM_MATERIAS_GRADO = {
 
 PROM_CREDITOS_DEFAULT = np.median(list(PROM_CREDITOS_GRADO.values()))
 PROM_MATERIAS_DEFAULT = np.median(list(PROM_MATERIAS_GRADO.values()))
+
+
+def aplicar_guardrails(probas, ppa, cursos_acum, creditos_acum):
+    ppa = float(ppa)
+    grad_override = cursos_acum > UMBRAL_CURSOS and creditos_acum > UMBRAL_CREDITOS
+
+    if grad_override:
+        for k in list(probas.keys()):
+            probas[k] = 0.0
+        probas['Grado'] = 1.0
+        return probas
+
+    if ppa >= PPA_SANCION_MIN:
+        for est in ESTADOS_SANCION:
+            if est in probas:
+                probas[est] = 0.0
+
+    total = sum(probas.values())
+    if total > 0:
+        for k in probas:
+            probas[k] /= total
+    return probas
 
 
 # =============================================================================
@@ -324,36 +366,52 @@ tab1, tab2, tab3 = st.tabs(["Prediccion Individual", "Prediccion Masiva (Batch)"
 # TAB 1 — PREDICCION INDIVIDUAL
 # ─────────────────────────────────────────────────────────────────────────────
 with tab1:
-    modelo_sel = st.radio(
-        "Modelo a utilizar",
-        ["Automata (con OHE)", "Numerico (sin leakage)"],
-        horizontal=True,
-        key="tab1_modelo",
+    modo = st.radio(
+        "Modo de prediccion",
+        ["Prediccion real (Modelo Numerico)",
+         "Simulacion What-If (Modelo Automata)"],
+        horizontal=True, key="tab1_modo",
     )
-    con_automata = modelo_sel.startswith("Automata")
+    es_whatif = modo.startswith("Simulacion")
 
-    if con_automata:
-        st.info("**Modelo Automata:** recibe estado actual + transicion del automata como features. "
-                "Resultado esperado ~100% porque el automata es determinista.")
+    if es_whatif:
+        st.info(
+            "**Simulacion What-If:** explora como cambiaria el estado academico "
+            "del estudiante ante diferentes eventos (transiciones). "
+            "Selecciona un estado actual y la app mostrara el resultado "
+            "para cada transicion posible.",
+        )
     else:
-        st.info("**Modelo Numerico:** predice SOLO con datos academicos (PPA, creditos, cursos, "
-                "orden, programa). Sin knowledge del automata. Resultados mas realistas.")
+        st.info(
+            "**Prediccion real:** basada solo en datos academicos numericos "
+            "(PPA, creditos, cursos, programa). Sin conocimiento del automata. "
+            "Resultados realistas.",
+        )
 
     col_form, col_result = st.columns([1, 1], gap="large")
 
     with col_form:
         st.markdown('<div class="section-title">Datos del estudiante</div>', unsafe_allow_html=True)
 
-        if con_automata:
-            estado = st.selectbox("Estado academico actual", estado_opts, index=2)
-            transicion = st.selectbox(
-                "Transicion del automata", trans_opts,
-                format_func=lambda t: f"{t} -- {TRANS_DESCRIPCIONES.get(t, '')}",
-                help="Simbolo de transicion del automata finito",
+        if es_whatif:
+            estado = st.selectbox(
+                "Estado academico actual",
+                estado_opts, index=2,
+                help="Estado en el que se encuentra el estudiante actualmente",
+            )
+            trans_opts_posibles = TRANS_POSIBLES.get(estado, trans_opts)
+            whatif_trans = st.selectbox(
+                "Transicion a simular (What-If)",
+                ["Todas las transiciones posibles"] + trans_opts_posibles,
+                format_func=lambda t: (
+                    "Todas las transiciones posibles" if t == "Todas las transiciones posibles"
+                    else f"{t} -- {TRANS_DESCRIPCIONES.get(t, '')}"
+                ),
+                help="Selecciona una transicion especifica o evalua todas las posibles",
             )
         else:
             estado = None
-            transicion = None
+            whatif_trans = None
 
         def _sync_ppa_from_slider():
             st.session_state.ppa_num = st.session_state.ppa_sl
@@ -402,10 +460,20 @@ with tab1:
                 help="Posicion secuencial del periodo en la trayectoria",
             )
 
+        with st.expander("Reglas de negocio aplicadas (Guardrails)", expanded=False):
+            st.markdown("""
+            - **Regla de Grado:** si CURSOS_ACUM > 55 y CREDITOS_ACUM > 150,
+              el resultado se fuerza a **Grado** automaticamente.
+            - **Filtro de sancion academica:** si PPA ≥ 3.0, las probabilidades
+              de estados de sancion (PAP, PAT, PFU, Recuperacion academica)
+              se anulan (no es posible que un estudiante con buen promedio
+              caiga en regimenes disciplinarios).
+            """)
+
         st.markdown("")
         predecir = st.button("Predecir siguiente estado", use_container_width=True)
 
-        if con_automata:
+        if es_whatif:
             with st.expander("Tabla de transiciones del automata (referencia)", expanded=False):
                 ref = pd.DataFrame([
                     {"Simbolo": k, "Significado": v}
@@ -417,45 +485,104 @@ with tab1:
         st.markdown('<div class="section-title">Resultado de la prediccion</div>', unsafe_allow_html=True)
 
         if predecir:
-            modelo_obj = model_a if con_automata else model_n
-            meta_obj = meta_a if con_automata else meta_n
+            if es_whatif:
+                trans_a_evaluar = (
+                    TRANS_POSIBLES.get(estado, trans_opts)
+                    if whatif_trans == "Todas las transiciones posibles"
+                    else [whatif_trans]
+                )
 
-            estado_siguiente, probabilidades = predict_individual(
-                modelo_obj, meta_obj, estado, transicion,
-                ppa_val, cursos, creditos, orden, programa,
-                con_automata=con_automata,
-            )
+                escenarios = []
+                for t in trans_a_evaluar:
+                    pred_est, probas = predict_individual(
+                        model_a, meta_a, estado, t,
+                        ppa_val, cursos, creditos, orden, programa,
+                        con_automata=True,
+                    )
+                    probas = aplicar_guardrails(probas, ppa_val, cursos, creditos)
+                    escenarios.append({
+                        'transicion': t,
+                        'trans_desc': TRANS_DESCRIPCIONES.get(t, ''),
+                        'estado': pred_est,
+                        'confianza': probas.get(pred_est, 0),
+                    })
 
-            color = PALETTE.get(estado_siguiente, "#666")
-            bg = BG_PALETTE.get(estado_siguiente, "#F8F9FA")
-            best_prob = probabilidades[estado_siguiente]
+                resumen_df = pd.DataFrame(escenarios)
+                resumen_df.columns = ['Transicion', 'Evento', 'Estado resultante', 'Confianza']
+                resumen_df['Confianza'] = resumen_df['Confianza'].map(lambda x: f"{x*100:.1f}%")
 
-            if con_automata:
-                transition_html = f"{estado} &rarr; <b>{estado_siguiente}</b>"
-                trans_desc = f"{transicion} -- {TRANS_DESCRIPCIONES.get(transicion, '')}"
+                st.markdown("#### Escenarios segun transicion")
+                st.dataframe(resumen_df, use_container_width=True, hide_index=True, height=260)
+
+                if whatif_trans != "Todas las transiciones posibles":
+                    sel = escenarios[0]
+                    pred_est = sel['estado']
+                    best_prob = sel['confianza']
+                    color = PALETTE.get(sel['estado'], "#666")
+                    bg = BG_PALETTE.get(sel['estado'], "#F8F9FA")
+                    st.markdown(f"""
+                    <div class="prediction-result-box" style="border-color:{color};background:{bg}">
+                        <div class="pred-label">Si ocurre &laquo;{sel['transicion']} -- {sel['trans_desc']}&raquo;</div>
+                        <div class="pred-estado" style="color:{color}">{sel['estado']}</div>
+                        <div class="pred-conf" style="color:{color}">
+                            Confianza: {sel['confianza']*100:.1f}%
+                        </div>
+                        <div class="pred-trans">
+                            {estado} &rarr; {sel['estado']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    best = max(escenarios, key=lambda x: x['confianza'])
+                    pred_est = best['estado']
+                    best_prob = best['confianza']
+                    color = PALETTE.get(best['estado'], "#666")
+                    bg = BG_PALETTE.get(best['estado'], "#F8F9FA")
+                    st.markdown(f"""
+                    <div class="prediction-result-box" style="border-color:{color};background:{bg}">
+                        <div class="pred-label">Resultado mas probable (entre todas las transiciones)</div>
+                        <div class="pred-estado" style="color:{color}">{best['estado']}</div>
+                        <div class="pred-conf" style="color:{color}">
+                            Via transicion &laquo;{best['transicion']} -- {best['trans_desc']}&raquo;
+                        </div>
+                        <div class="pred-trans">
+                            {estado} &rarr; {best['estado']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
             else:
-                transition_html = f"<b>{estado_siguiente}</b>"
-                trans_desc = None
+                pred_est, probas = predict_individual(
+                    model_n, meta_n, None, None,
+                    ppa_val, cursos, creditos, orden, programa,
+                    con_automata=False,
+                )
+                probas = aplicar_guardrails(probas, ppa_val, cursos, creditos)
+                if sum(probas.values()) > 0:
+                    pred_est = max(probas, key=probas.get)
+                best_prob = probas.get(pred_est, 0)
 
-            st.markdown(f"""
-            <div class="prediction-result-box" style="border-color:{color};background:{bg}">
-                <div class="pred-label">El estudiante avanzara a</div>
-                <div class="pred-estado" style="color:{color}">{estado_siguiente}</div>
-                <div class="pred-conf" style="color:{color}">
-                    Confianza del modelo: {best_prob * 100:.1f}%
+                color = PALETTE.get(pred_est, "#666")
+                bg = BG_PALETTE.get(pred_est, "#F8F9FA")
+
+                st.markdown(f"""
+                <div class="prediction-result-box" style="border-color:{color};background:{bg}">
+                    <div class="pred-label">El estudiante avanzara a</div>
+                    <div class="pred-estado" style="color:{color}">{pred_est}</div>
+                    <div class="pred-conf" style="color:{color}">
+                        Confianza del modelo: {best_prob * 100:.1f}%
+                    </div>
                 </div>
-                <div class="pred-trans" style="margin-top:0.8rem;font-size:1.1rem;color:#334155">
-                    {transition_html}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
             st.markdown("#### Resumen de la prediccion")
             resumen_data = [("Campo", "Valor")]
-            resumen_data.append(("Modelo utilizado", modelo_sel))
-            if con_automata:
+            resumen_data.append(("Modo", modo))
+            if es_whatif:
                 resumen_data.append(("Estado actual del estudiante", estado))
-                resumen_data.append(("Transicion aplicada", trans_desc))
+                resumen_data.append(("Transicion simulada",
+                    "Todas las posibles" if whatif_trans == "Todas las transiciones posibles"
+                    else f"{whatif_trans} -- {TRANS_DESCRIPCIONES.get(whatif_trans, '')}"))
             resumen_data += [
                 ("PPA acumulado", f"{ppa_val:.2f}"),
                 ("Creditos aprobados", str(creditos)),
@@ -463,11 +590,11 @@ with tab1:
                 ("Programa", programa),
                 ("Periodo en la trayectoria", f"#{orden}"),
                 ("", ""),
-                ("ESTADO PREDICHO", f"{estado_siguiente}"),
+                ("ESTADO PREDICHO", pred_est),
                 ("Confianza del modelo", f"{best_prob * 100:.1f}%"),
             ]
             det_df = pd.DataFrame(resumen_data[1:], columns=resumen_data[0])
-            st.dataframe(det_df, use_container_width=True, hide_index=True, height=380)
+            st.dataframe(det_df, use_container_width=True, hide_index=True, height=400)
 
             st.markdown("---")
             m1, m2, m3 = st.columns(3)
@@ -480,8 +607,8 @@ with tab1:
                     "Reinicio": "Bajo", "Transferencia interna": "Bajo",
                     "PAP": "Medio", "Recuperacion academica": "Medio",
                     "PAT": "Alto", "PFU": "Alto",
-                    "Final": "Ciritico", "Exclusion": "Ciritico",
-                }.get(estado_siguiente, "--")
+                    "Final": "Critico", "Exclusion": "Critico",
+                }.get(pred_est, "--")
                 st.metric("Nivel de riesgo", nivel)
             with m3:
                 rec = {
@@ -489,38 +616,60 @@ with tab1:
                     "PAP": "Apoyo academico", "PAT": "Intervencion urgente",
                     "Recuperacion academica": "Tutoria", "PFU": "Contactar estudiante",
                     "Final": "Proceso administrativo", "Exclusion": "Proceso administrativo",
-                }.get(estado_siguiente, "--")
+                }.get(pred_est, "--")
                 st.metric("Accion recomendada", rec)
 
-            st.markdown("---")
-            st.markdown("#### Probabilidades por clase")
-
-            proba_df = pd.DataFrame([
-                {"Estado": k, "Probabilidad": v, "Porcentaje": f"{v*100:.1f}%"}
-                for k, v in sorted(probabilidades.items(), key=lambda x: -x[1])
-            ])
-            proba_df['Color'] = proba_df['Estado'].map(lambda x: PALETTE.get(x, "#888"))
-            proba_df['Ranking'] = range(1, len(proba_df) + 1)
-            proba_df_show = proba_df[['Ranking', 'Estado', 'Probabilidad', 'Porcentaje']].copy()
-            proba_df_show['Probabilidad'] = proba_df_show['Probabilidad'].map(lambda x: f"{x:.4f}")
-            st.dataframe(proba_df_show, use_container_width=True, hide_index=True, height=340)
-
-            fig_p, ax_p = plt.subplots(figsize=(8, 4))
-            ax_p.barh(
-                proba_df['Estado'], proba_df['Probabilidad'],
-                color=proba_df['Color'].tolist(), height=0.6, edgecolor='white',
+            probas_to_show = (
+                escenarios[0] if es_whatif and whatif_trans != "Todas las transiciones posibles"
+                else None
             )
-            ax_p.set_xlim(0, 1.05)
-            ax_p.set_xlabel('Probabilidad')
-            ax_p.set_title('Distribucion de probabilidad del modelo', fontweight='bold')
-            ax_p.invert_yaxis()
-            for s in ['top', 'right']:
-                ax_p.spines[s].set_visible(False)
-            for i, v in enumerate(proba_df['Probabilidad']):
-                ax_p.text(v + 0.01, i, f"{v:.3f}", va='center', fontsize=8)
-            fig_p.tight_layout()
-            st.pyplot(fig_p, use_container_width=True)
-            plt.close(fig_p)
+            if probas_to_show:
+                _, probas_full = predict_individual(
+                    model_a, meta_a, estado, whatif_trans,
+                    ppa_val, cursos, creditos, orden, programa,
+                    con_automata=True,
+                )
+                probas_full = aplicar_guardrails(probas_full, ppa_val, cursos, creditos)
+            elif not es_whatif:
+                _, probas_full = predict_individual(
+                    model_n, meta_n, None, None,
+                    ppa_val, cursos, creditos, orden, programa,
+                    con_automata=False,
+                )
+                probas_full = aplicar_guardrails(probas_full, ppa_val, cursos, creditos)
+            else:
+                probas_full = None
+
+            if probas_full:
+                st.markdown("---")
+                st.markdown("#### Probabilidades por clase")
+
+                proba_df = pd.DataFrame([
+                    {"Estado": k, "Probabilidad": v, "Porcentaje": f"{v*100:.1f}%"}
+                    for k, v in sorted(probas_full.items(), key=lambda x: -x[1])
+                ])
+                proba_df['Color'] = proba_df['Estado'].map(lambda x: PALETTE.get(x, "#888"))
+                proba_df['Ranking'] = range(1, len(proba_df) + 1)
+                proba_df_show = proba_df[['Ranking', 'Estado', 'Probabilidad', 'Porcentaje']].copy()
+                proba_df_show['Probabilidad'] = proba_df_show['Probabilidad'].map(lambda x: f"{x:.4f}")
+                st.dataframe(proba_df_show, use_container_width=True, hide_index=True, height=340)
+
+                fig_p, ax_p = plt.subplots(figsize=(8, 4))
+                ax_p.barh(
+                    proba_df['Estado'], proba_df['Probabilidad'],
+                    color=proba_df['Color'].tolist(), height=0.6, edgecolor='white',
+                )
+                ax_p.set_xlim(0, 1.05)
+                ax_p.set_xlabel('Probabilidad')
+                ax_p.set_title('Distribucion de probabilidad del modelo', fontweight='bold')
+                ax_p.invert_yaxis()
+                for s in ['top', 'right']:
+                    ax_p.spines[s].set_visible(False)
+                for i, v in enumerate(proba_df['Probabilidad']):
+                    ax_p.text(v + 0.01, i, f"{v:.3f}", va='center', fontsize=8)
+                fig_p.tight_layout()
+                st.pyplot(fig_p, use_container_width=True)
+                plt.close(fig_p)
         else:
             st.markdown("""
             <div style="border:2px dashed #CBD5E1;border-radius:14px;padding:3rem 2rem;
@@ -538,18 +687,19 @@ with tab1:
 # ─────────────────────────────────────────────────────────────────────────────
 with tab2:
     modelo_sel_b = st.radio(
-        "Modelo a utilizar",
-        ["Automata (con OHE)", "Numerico (sin leakage)"],
+        "Modo de prediccion",
+        ["Prediccion real (Modelo Numerico)",
+         "Simulacion What-If (Modelo Automata)"],
         horizontal=True,
-        key="tab2_modelo",
+        key="tab2_modo",
     )
-    con_automata_b = modelo_sel_b.startswith("Automata")
+    es_whatif_b = modelo_sel_b.startswith("Simulacion")
 
-    if con_automata_b:
+    if es_whatif_b:
         st.markdown("""
         <div style="background:#F0F7FF;border:1px solid #BFDBFE;border-radius:12px;
         padding:1rem 1.3rem;margin-bottom:1.3rem;font-size:0.88rem;color:#1E40AF">
-        <strong>Formato del CSV/Excel (Modelo Automata):</strong> debe contener las columnas
+        <strong>Formato del CSV/Excel (Simulacion What-If):</strong> debe contener las columnas
         <code>ESTADO_AUTOMATA</code>, <code>TRANSICION_AUTOMATA</code>,
         <code>PROMEDIO_ACUMULADO</code>, <code>CREDITOS_APROVADOS</code>,
         <code>NRO_CURSOS_APROBADOS</code>.
@@ -560,7 +710,7 @@ with tab2:
         st.markdown("""
         <div style="background:#EDFAF4;border:1px solid #A7F3D0;border-radius:12px;
         padding:1rem 1.3rem;margin-bottom:1.3rem;font-size:0.88rem;color:#065F46">
-        <strong>Formato del CSV/Excel (Modelo Numerico):</strong> solo necesita columnas academicas:
+        <strong>Formato del CSV/Excel (Prediccion real):</strong> solo necesita columnas academicas:
         <code>PROMEDIO_ACUMULADO</code>, <code>CREDITOS_APROVADOS</code>,
         <code>NRO_CURSOS_APROBADOS</code>.
         Opcional: <code>PROGRAMA</code>, <code>PERIODO</code>, <code>ID</code>, <code>ESTADO_CONSECUENTE</code>.
@@ -584,7 +734,7 @@ with tab2:
                     df_up = pd.read_csv(uploaded, encoding="latin-1")
 
         required_base = {'PROMEDIO_ACUMULADO', 'CREDITOS_APROVADOS', 'NRO_CURSOS_APROBADOS'}
-        if con_automata_b:
+        if es_whatif_b:
             required_base |= {'ESTADO_AUTOMATA', 'TRANSICION_AUTOMATA'}
         missing = required_base - set(df_up.columns)
         if missing:
@@ -592,9 +742,9 @@ with tab2:
             st.stop()
 
         with st.spinner("Generando predicciones..."):
-            modelo_obj = model_a if con_automata_b else model_n
-            meta_obj = meta_a if con_automata_b else meta_n
-            preds = predict_batch(modelo_obj, meta_obj, df_up, con_automata=con_automata_b)
+            modelo_obj = model_a if es_whatif_b else model_n
+            meta_obj = meta_a if es_whatif_b else meta_n
+            preds = predict_batch(modelo_obj, meta_obj, df_up, con_automata=es_whatif_b)
 
         df_up['PREDICCION_XGB'] = preds.values
         has_target = 'ESTADO_CONSECUENTE' in df_up.columns
@@ -991,23 +1141,22 @@ with tab3:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### Sobre los modelos")
+    st.markdown("### Sobre los modos")
     st.markdown(f"""
     **Modelo Predictivo de Trayectorias Academicas**
 
-    Dos modelos XGBoost que predicen el estado academico siguiente.
+    ---
+    **Simulacion What-If (Automata)**
+    - F1-Macro: {cv_a['f1_macro_mean']:.4f}
+    - 37 features (incluye OHE estado+transicion)
+    - Referencia: replica el automata (~100%)
+
+    **Prediccion real (Numerico)**
+    - F1-Macro: {cv_n['f1_macro_mean']:.4f} (realista)
+    - 9 features (solo datos academicos)
+    - Sin knowledge del automata
 
     ---
-    **Automata (con OHE)**
-    - F1-Macro: {cv_a['f1_macro_mean']:.4f} +/- {cv_a['f1_macro_std']:.4f}
-    - Accuracy: {cv_a['accuracy_mean']:.4f}
-    - Features: {len(meta_a['feature_names'])}
-
-    **Numerico (sin leakage)**
-    - F1-Macro: {cv_n['f1_macro_mean']:.4f} +/- {cv_n['f1_macro_std']:.4f}
-    - Accuracy: {cv_n['accuracy_mean']:.4f}
-    - Features: {len(meta_n['feature_names'])}
-
     - **Filas:** {n_rows:,}
     - **Estudiantes:** {n_students:,}
     """)

@@ -153,6 +153,40 @@ RIESGO_ACADEMICO = ESTADO_AUTOMATA in ['PAP', 'PAT', 'PFU']
 
 Feature booleana que solo existe en el modelo Automata. Captura si el estudiante esta en riesgo. Es redundante con la OHE del estado (un estado PAP ya implica riesgo), pero mejora la interpretabilidad del modelo.
 
+### 4.3 Guardrails (Mascaras de Estado Post-Prediccion)
+
+Las reglas de negocio no solo se aplican en entrenamiento. En inferencia (app), se implementan **guardrails** que filtran y corrigen las probabilidades del modelo:
+
+```python
+def aplicar_guardrails(probas, ppa, cursos_acum, creditos_acum):
+    # Override: umbrales de grado
+    if cursos_acum > 55 and creditos_acum > 150:
+        for k in probas: probas[k] = 0.0
+        probas['Grado'] = 1.0
+        return probas
+
+    # Filtro: PPA >= 3.0 impide sancion academica
+    if ppa >= 3.0:
+        for est in {'PAP', 'PAT', 'PFU', 'Recuperacion academica'}:
+            if est in probas: probas[est] = 0.0
+
+    total = sum(probas.values())
+    if total > 0:
+        for k in probas: probas[k] /= total
+    return probas
+```
+
+**Reglas implementadas:**
+1. **Override de Grado:** Si CURSOS_ACUM > 55 y CREDITOS_ACUM > 150 → `probas['Grado'] = 1.0`
+2. **Filtro de sancion:** Si PPA ≥ 3.0 → PAP, PAT, PFU, Recuperacion academica tienen proba = 0
+
+**Por que post-prediccion y no solo en entrenamiento:**
+- El modelo puede dar probabilidades no nulas a estados institucionalmente imposibles
+- Las reglas pueden cambiar sin reentrenar (e.g., umbral de PPA podria ser 3.5)
+- Es una capa de seguridad adicional que no depende del modelo
+
+**Efecto:** Las probabilidades se renormalizan tras aplicar los filtros, asegurando que sumen 1.0.
+
 ---
 
 ## 5. Evaluacion y Metricas
