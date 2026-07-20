@@ -1,10 +1,10 @@
 # =============================================================================
-# entrenar.py — Entrenamiento dual del modelo predictivo de trayectorias
+# entrenar.py — Entrenamiento de 3 modelos predictivos de trayectorias
 #
-# Ejecutar una vez para generar ambos modelos entrenados:
+# Ejecutar una vez para generar todos los modelos entrenados:
 #   py -3.10 entrenar.py
 #
-# Genera 2 modelos:
+# Genera 3 modelos:
 #   Modelo "Automata" (con OHE estado+transicion):
 #     modelo/modelo_xgb.pkl, modelo/metadata.pkl
 #     outputs/metrics.json, outputs/feature_importance.png, etc.
@@ -12,6 +12,10 @@
 #   Modelo "Numerico" (sin leakage, solo datos academicos):
 #     modelo/modelo_xgb_numerico.pkl, modelo/metadata_numerico.pkl
 #     outputs/numerico/metrics.json, outputs/numerico/feature_importance.png, etc.
+#
+#   Modelo "Hibrido" (numerico + OHE estado, sin transicion):
+#     modelo/modelo_xgb_hibrido.pkl, modelo/metadata_hibrido.pkl
+#     outputs/hibrido/metrics.json, outputs/hibrido/feature_importance.png, etc.
 # =============================================================================
 
 import pandas as pd
@@ -146,8 +150,13 @@ def preprocesar(df):
     return df_clean
 
 
-def construir_features(df_clean, con_automata=True):
-    nombre = "Automata (con OHE)" if con_automata else "Numerico (sin leakage)"
+def construir_features(df_clean, modo='numerico'):
+    modos = {
+        'automata': 'Automata (con OHE estado+transicion)',
+        'hibrido': 'Hibrido (numerico + OHE estado)',
+        'numerico': 'Numerico (sin leakage)',
+    }
+    nombre = modos.get(modo, modo)
     print(f"\nConstruyendo features — {nombre}...")
 
     for col in FEATURES_NUMERICAS:
@@ -157,21 +166,26 @@ def construir_features(df_clean, con_automata=True):
         df_clean[col] = df_clean[col].fillna(df_clean[col].median())
 
     parts = [df_clean[FEATURES_NUMERICAS].reset_index(drop=True)]
+    df_clean['RIESGO_ACADEMICO'] = df_clean['ESTADO_AUTOMATA'].isin(
+        ['PAP', 'PAT', 'PFU']
+    ).astype(int)
 
-    if con_automata:
+    if modo == 'automata':
         FEATURES_BOOLEANAS = ['RIESGO_ACADEMICO', 'CUMPLE_REGLA_GRADO']
-        df_clean['RIESGO_ACADEMICO'] = df_clean['ESTADO_AUTOMATA'].isin(
-            ['PAP', 'PAT', 'PFU']
-        ).astype(int)
         parts.append(df_clean[FEATURES_BOOLEANAS].reset_index(drop=True))
-
         estado_dummies = pd.get_dummies(df_clean['ESTADO_AUTOMATA'], prefix='ESTADO')
         trans_dummies = pd.get_dummies(df_clean['TRANSICION_AUTOMATA'], prefix='TRANS')
         parts.append(estado_dummies.reset_index(drop=True))
         parts.append(trans_dummies.reset_index(drop=True))
-
         desc = (f"{len(FEATURES_NUMERICAS)} num + {len(FEATURES_BOOLEANAS)} bool + "
                 f"{estado_dummies.shape[1]} OHE estado + {trans_dummies.shape[1]} OHE trans")
+    elif modo == 'hibrido':
+        FEATURES_BOOLEANAS = ['RIESGO_ACADEMICO', 'CUMPLE_REGLA_GRADO']
+        parts.append(df_clean[FEATURES_BOOLEANAS].reset_index(drop=True))
+        estado_dummies = pd.get_dummies(df_clean['ESTADO_AUTOMATA'], prefix='ESTADO')
+        parts.append(estado_dummies.reset_index(drop=True))
+        desc = (f"{len(FEATURES_NUMERICAS)} num + {len(FEATURES_BOOLEANAS)} bool + "
+                f"{estado_dummies.shape[1]} OHE estado")
     else:
         parts.append(df_clean[['CUMPLE_REGLA_GRADO']].reset_index(drop=True))
         desc = f"{len(FEATURES_NUMERICAS)} num + 1 bool (CUMPLE_REGLA_GRADO)"
@@ -271,13 +285,17 @@ def entrenar_modelo_final(X, y):
 
 
 def guardar_modelo(model, feature_names, c2i, cv_summary, fold_metrics,
-                   n_rows, n_students, version_str, dir_modelo, dir_outputs):
+                   n_rows, n_students, version_str, dir_modelo, dir_outputs,
+                   nombre_archivo='modelo_xgb'):
     os.makedirs(dir_modelo, exist_ok=True)
     os.makedirs(dir_outputs, exist_ok=True)
 
-    modelo_path = os.path.join(dir_modelo, 'modelo_xgb.pkl')
+    modelo_path = os.path.join(dir_modelo, f'{nombre_archivo}.pkl')
     with open(modelo_path, 'wb') as f:
         pickle.dump(model, f)
+
+    sufijo = nombre_archivo.replace('modelo_xgb', '')
+    meta_nombre = f'metadata{sufijo}.pkl'
 
     metadata = {
         'feature_names': feature_names,
@@ -289,7 +307,7 @@ def guardar_modelo(model, feature_names, c2i, cv_summary, fold_metrics,
         'n_students': n_students,
         'dataset': RUTA_DATOS,
     }
-    meta_path = os.path.join(dir_modelo, 'metadata.pkl')
+    meta_path = os.path.join(dir_modelo, meta_nombre)
     with open(meta_path, 'wb') as f:
         pickle.dump(metadata, f)
 
@@ -399,15 +417,17 @@ def generar_matriz_confusion(model, X, y, groups, cv_summary, dir_outputs, titul
     print(f"[OK] Reporte guardado: {dir_outputs}/classification_report.json")
 
 
-def entrenar_modelo(nombre, df_clean, con_automata, version_str, dir_modelo, dir_outputs):
-    X, y, groups = construir_features(df_clean.copy(), con_automata=con_automata)
+def entrenar_modelo(nombre, df_clean, modo, version_str, dir_modelo, dir_outputs,
+                    nombre_archivo='modelo_xgb'):
+    X, y, groups = construir_features(df_clean.copy(), modo=modo)
     fold_metrics, cv_summary = cross_validate(X, y, groups, nombre)
     model, c2i = entrenar_modelo_final(X, y)
 
     feature_names = list(X.columns)
     guardar_modelo(model, feature_names, c2i, cv_summary, fold_metrics,
                    len(df_clean), df_clean['ID'].nunique(),
-                   version_str, dir_modelo, dir_outputs)
+                   version_str, dir_modelo, dir_outputs,
+                   nombre_archivo=nombre_archivo)
     generar_figuras(model, feature_names, cv_summary, dir_outputs, titulo_extra='')
     generar_matriz_confusion(model, X, y, groups, cv_summary, dir_outputs, titulo_extra='')
 
@@ -420,7 +440,7 @@ def entrenar_modelo(nombre, df_clean, con_automata, version_str, dir_modelo, dir
 
 if __name__ == '__main__':
     print("=" * 70)
-    print("ENTRENAMIENTO DUAL — Modelo Predictivo de Trayectorias Academicas")
+    print("ENTRENAMIENTO TRIPLE — Modelo Predictivo de Trayectorias Academicas")
     print("=" * 70)
 
     df = cargar_datos()
@@ -433,7 +453,7 @@ if __name__ == '__main__':
     cv_auto = entrenar_modelo(
         nombre="Automata (con OHE)",
         df_clean=df_clean,
-        con_automata=True,
+        modo='automata',
         version_str="XGBoost + OHE(estado+transicion) + 5-fold CV (AUTOMATA)",
         dir_modelo='modelo',
         dir_outputs='outputs',
@@ -446,17 +466,34 @@ if __name__ == '__main__':
     cv_num = entrenar_modelo(
         nombre="Numerico (sin leakage)",
         df_clean=df_clean,
-        con_automata=False,
+        modo='numerico',
         version_str="XGBoost numerico + 5-fold CV (SIN LEAKAGE)",
         dir_modelo='modelo',
         dir_outputs='outputs/numerico',
+        nombre_archivo='modelo_xgb_numerico',
+    )
+
+    # --- Modelo 3: Hibrido (numerico + OHE estado) ---
+    print("\n" + "#" * 70)
+    print("# MODELO 3: HIBRIDO (numerico + OHE estado, sin transicion)")
+    print("#" * 70)
+    cv_hib = entrenar_modelo(
+        nombre="Hibrido (numerico + OHE estado)",
+        df_clean=df_clean,
+        modo='hibrido',
+        version_str="XGBoost hibrido + 5-fold CV (HIBRIDO)",
+        dir_modelo='modelo',
+        dir_outputs='outputs/hibrido',
+        nombre_archivo='modelo_xgb_hibrido',
     )
 
     print("\n" + "=" * 70)
-    print("ENTRENAMIENTO DUAL COMPLETADO")
+    print("ENTRENAMIENTO TRIPLE COMPLETADO")
     print("=" * 70)
     print(f"\n  Modelo Automata:  F1-Macro = {cv_auto['f1_macro_mean']:.4f} +/- {cv_auto['f1_macro_std']:.4f}")
     print(f"  Modelo Numerico:  F1-Macro = {cv_num['f1_macro_mean']:.4f} +/- {cv_num['f1_macro_std']:.4f}")
-    print(f"\n  Gap: {cv_auto['f1_macro_mean'] - cv_num['f1_macro_mean']:.4f}")
-    print(f"  (El gap representa la informacion que carries el estado/transicion del automata)")
+    print(f"  Modelo Hibrido:   F1-Macro = {cv_hib['f1_macro_mean']:.4f} +/- {cv_hib['f1_macro_std']:.4f}")
+    print(f"\n  Gap Auto-Num: {cv_auto['f1_macro_mean'] - cv_num['f1_macro_mean']:.4f}")
+    print(f"  Gap Hib-Num:  {cv_hib['f1_macro_mean'] - cv_num['f1_macro_mean']:.4f}")
+    print(f"  (El gap hibrido representa informacion que aporta solo el estado, sin la transicion)")
     print(f"\n  Para ejecutar la app: py -3.10 -m streamlit run app.py")

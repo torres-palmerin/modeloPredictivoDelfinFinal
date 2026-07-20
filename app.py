@@ -205,6 +205,7 @@ def load_models():
     paths = {
         'automata': ('modelo/modelo_xgb.pkl', 'modelo/metadata.pkl'),
         'numerico': ('modelo/modelo_xgb_numerico.pkl', 'modelo/metadata_numerico.pkl'),
+        'hibrido': ('modelo/modelo_xgb_hibrido.pkl', 'modelo/metadata_hibrido.pkl'),
     }
     models = {}
     for key, (mp, mtp) in paths.items():
@@ -240,9 +241,41 @@ def load_estado_options():
     )
 
 
+COLUMN_ALIASES = {
+    'PROMEDIO_ACUMULADO': ['promedio_acumulado', 'promedio', 'ppa', 'promedio_general'],
+    'CREDITOS_APROVADOS': ['creditos_aprobados', 'creditos', 'creditos_aprovados'],
+    'NRO_CURSOS_APROBADOS': ['nro_cursos_aprobados', 'cursos_aprobados', 'cursos',
+                              'num_cursos_aprobados', 'numero_cursos_aprobados',
+                              'materias_aprobadas', 'materias'],
+    'ESTADO_AUTOMATA': ['estado_automata', 'estado', 'estado_actual'],
+    'TRANSICION_AUTOMATA': ['transicion_automata', 'transicion', 'transicion_actual'],
+    'PROGRAMA': ['programa', 'carrera'],
+    'PERIODO': ['periodo', 'semestre'],
+    'ID': ['id', 'identificador'],
+    'ESTADO_CONSECUENTE': ['estado_consecuente', 'estado_resultado', 'target', 'destino'],
+}
+
+
+def normalize_columns(df):
+    norm_map = {}
+    for col in df.columns:
+        key = col.strip().lower().replace(' ', '_').replace('-', '_')
+        for canonical, aliases in COLUMN_ALIASES.items():
+            if key in aliases or key == canonical.lower():
+                norm_map[col] = canonical
+                break
+    df = df.rename(columns=norm_map)
+    dupes = df.columns[df.columns.duplicated(keep=False)]
+    for col in dupes.unique():
+        cols = df.columns[df.columns == col]
+        if len(cols) > 1:
+            df[col] = df[cols].ffill(axis=1).iloc[:, 0]
+    return df.loc[:, ~df.columns.duplicated(keep='first')]
+
+
 def predict_individual(model, metadata, estado, transicion,
                        ppa, cursos_aprob, creditos_aprob, orden, programa,
-                       con_automata=True):
+                       modo='numerico'):
     feature_names = metadata['feature_names']
     idx_to_class = metadata['idx_to_class']
     cursos_acum = float(cursos_aprob)
@@ -262,7 +295,7 @@ def predict_individual(model, metadata, estado, transicion,
         'CUMPLE_REGLA_GRADO': float(cursos_acum > UMBRAL_CURSOS and creditos_acum > UMBRAL_CREDITOS),
     }
 
-    if con_automata:
+    if modo in ('hibrido', 'automata'):
         input_dict['RIESGO_ACADEMICO'] = float(estado in ['PAP', 'PAT', 'PFU'])
 
     row = pd.DataFrame(0.0, index=[0], columns=feature_names)
@@ -270,13 +303,14 @@ def predict_individual(model, metadata, estado, transicion,
         if col in row.columns:
             row[col] = val
 
-    if con_automata:
+    if modo in ('hibrido', 'automata'):
         est_col = f'ESTADO_{estado}'
         if est_col in row.columns:
             row[est_col] = 1
-        trans_col = f'TRANS_{transicion}'
-        if trans_col in row.columns:
-            row[trans_col] = 1
+        if modo == 'automata':
+            trans_col = f'TRANS_{transicion}'
+            if trans_col in row.columns:
+                row[trans_col] = 1
 
     pred_encoded = model.predict(row)[0]
     proba = model.predict_proba(row)[0]
@@ -285,7 +319,7 @@ def predict_individual(model, metadata, estado, transicion,
     return pred_name, proba_dict
 
 
-def predict_batch(model, metadata, df, con_automata=True):
+def predict_batch(model, metadata, df, modo='numerico'):
     feature_names = metadata['feature_names']
     X = pd.DataFrame(0.0, index=range(len(df)), columns=feature_names)
 
@@ -313,17 +347,19 @@ def predict_batch(model, metadata, df, con_automata=True):
             (X['CURSOS_ACUM'] > UMBRAL_CURSOS) & (X['CREDITOS_ACUM'] > UMBRAL_CREDITOS)
         ).astype(float)
 
-    if con_automata:
+    if modo in ('hibrido', 'automata'):
         if 'ESTADO_AUTOMATA' in df.columns:
             for c in pd.get_dummies(df['ESTADO_AUTOMATA'], prefix='ESTADO').columns:
                 if c in X.columns:
                     X[c] = pd.get_dummies(df['ESTADO_AUTOMATA'], prefix='ESTADO')[c].values
+        if 'RIESGO_ACADEMICO' in X.columns and 'ESTADO_AUTOMATA' in df.columns:
+            X['RIESGO_ACADEMICO'] = df['ESTADO_AUTOMATA'].isin(['PAP', 'PAT', 'PFU']).astype(float)
+
+    if modo == 'automata':
         if 'TRANSICION_AUTOMATA' in df.columns:
             for c in pd.get_dummies(df['TRANSICION_AUTOMATA'], prefix='TRANS').columns:
                 if c in X.columns:
                     X[c] = pd.get_dummies(df['TRANSICION_AUTOMATA'], prefix='TRANS')[c].values
-        if 'RIESGO_ACADEMICO' in X.columns and 'ESTADO_AUTOMATA' in df.columns:
-            X['RIESGO_ACADEMICO'] = df['ESTADO_AUTOMATA'].isin(['PAP', 'PAT', 'PFU']).astype(float)
 
     pred = model.predict(X)
     idx_to_class = metadata['idx_to_class']
@@ -337,8 +373,10 @@ def predict_batch(model, metadata, df, con_automata=True):
 models = load_models()
 model_a, meta_a = models['automata']
 model_n, meta_n = models['numerico']
+model_h, meta_h = models['hibrido']
 cv_a = meta_a['cv_summary']
 cv_n = meta_n['cv_summary']
+cv_h = meta_h['cv_summary']
 n_rows = meta_a['n_rows']
 n_students = meta_a['n_students']
 
@@ -352,7 +390,7 @@ st.markdown(f"""
 <div class="main-header">
     <h1>Simulador de Trayectorias Academicas</h1>
     <p>Modelo Predictivo XGBoost · Universidad Tecnologica de Bolivar</p>
-    <span class="badge">Dual: Automata F1={cv_a['f1_macro_mean']:.4f} vs Numerico F1={cv_n['f1_macro_mean']:.4f} · {n_rows:,} filas · {n_students:,} estudiantes</span>
+    <span class="badge">What-If F1={cv_a['f1_macro_mean']:.4f} · Hibrido F1={cv_h['f1_macro_mean']:.4f} · Real F1={cv_n['f1_macro_mean']:.4f} · {n_rows:,} filas · {n_students:,} estudiantes</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -374,31 +412,64 @@ with tab1:
     )
     es_whatif = modo.startswith("Simulacion")
 
-    if es_whatif:
-        st.info(
-            "**Simulacion What-If:** explora como cambiaria el estado academico "
-            "del estudiante ante diferentes eventos (transiciones). "
-            "Selecciona un estado actual y la app mostrara el resultado "
-            "para cada transicion posible.",
-        )
-    else:
-        st.info(
-            "**Prediccion real:** basada solo en datos academicos numericos "
-            "(PPA, creditos, cursos, programa). Sin conocimiento del automata. "
-            "Resultados realistas.",
-        )
-
     col_form, col_result = st.columns([1, 1], gap="large")
 
     with col_form:
+        if es_whatif:
+            modo_inferencia = 'automata'
+            modelo_obj = model_a
+            meta_obj = meta_a
+            label_modo = "Simulacion What-If (Automata)"
+            st.info(
+                "**Simulacion What-If:** explora como cambiaria el estado academico "
+                "del estudiante ante diferentes eventos (transiciones). "
+                "Selecciona un estado actual y la app mostrara el resultado "
+                "para cada transicion posible.",
+            )
+            incluir_estado = False
+        else:
+            incluir_estado = st.checkbox(
+                "Incluir Estado Actual como Feature Categorica",
+                value=False, key="incluir_estado_cb",
+                help=("Al activar esta opcion, el modelo combinara los indicadores "
+                      "numericos con la condicion legal previa del estudiante "
+                      "(Enfoque Hibrido). Si esta desactivado, el modelo predecira "
+                      "unicamente con base en metricas cuantitativas."),
+            )
+            if incluir_estado:
+                modo_inferencia = 'hibrido'
+                modelo_obj = model_h
+                meta_obj = meta_h
+                label_modo = "Prediccion Hibrida (Numerico + Estado Categorico)"
+                st.info(
+                    "**Prediccion Hibrida:** combina indicadores numericos "
+                    "(PPA, creditos, cursos) con el estado academico actual "
+                    "del estudiante como feature categorica. "
+                    "F1-Macro del modelo: {:.4f}.".format(cv_h['f1_macro_mean']),
+                )
+            else:
+                modo_inferencia = 'numerico'
+                modelo_obj = model_n
+                meta_obj = meta_n
+                label_modo = "Prediccion Real (Modelo Numerico Puro)"
+                st.info(
+                    "**Prediccion real:** basada solo en datos academicos numericos "
+                    "(PPA, creditos, cursos, programa). Sin conocimiento del automata. "
+                    "Resultados realistas.",
+                )
+
         st.markdown('<div class="section-title">Datos del estudiante</div>', unsafe_allow_html=True)
 
-        if es_whatif:
+        if modo_inferencia in ('hibrido', 'automata'):
             estado = st.selectbox(
                 "Estado academico actual",
                 estado_opts, index=2,
                 help="Estado en el que se encuentra el estudiante actualmente",
             )
+        else:
+            estado = None
+
+        if modo_inferencia == 'automata':
             trans_opts_posibles = TRANS_POSIBLES.get(estado, trans_opts)
             whatif_trans = st.selectbox(
                 "Transicion a simular (What-If)",
@@ -410,7 +481,6 @@ with tab1:
                 help="Selecciona una transicion especifica o evalua todas las posibles",
             )
         else:
-            estado = None
             whatif_trans = None
 
         def _sync_ppa_from_slider():
@@ -473,7 +543,7 @@ with tab1:
         st.markdown("")
         predecir = st.button("Predecir siguiente estado", use_container_width=True)
 
-        if es_whatif:
+        if modo_inferencia == 'automata':
             with st.expander("Tabla de transiciones del automata (referencia)", expanded=False):
                 ref = pd.DataFrame([
                     {"Simbolo": k, "Significado": v}
@@ -485,7 +555,7 @@ with tab1:
         st.markdown('<div class="section-title">Resultado de la prediccion</div>', unsafe_allow_html=True)
 
         if predecir:
-            if es_whatif:
+            if modo_inferencia == 'automata':
                 trans_a_evaluar = (
                     TRANS_POSIBLES.get(estado, trans_opts)
                     if whatif_trans == "Todas las transiciones posibles"
@@ -497,7 +567,7 @@ with tab1:
                     pred_est, probas = predict_individual(
                         model_a, meta_a, estado, t,
                         ppa_val, cursos, creditos, orden, programa,
-                        con_automata=True,
+                        modo='automata',
                     )
                     probas = aplicar_guardrails(probas, ppa_val, cursos, creditos)
                     escenarios.append({
@@ -553,9 +623,10 @@ with tab1:
 
             else:
                 pred_est, probas = predict_individual(
-                    model_n, meta_n, None, None,
+                    modelo_obj, meta_obj,
+                    estado, None,
                     ppa_val, cursos, creditos, orden, programa,
-                    con_automata=False,
+                    modo=modo_inferencia,
                 )
                 probas = aplicar_guardrails(probas, ppa_val, cursos, creditos)
                 if sum(probas.values()) > 0:
@@ -565,6 +636,17 @@ with tab1:
                 color = PALETTE.get(pred_est, "#666")
                 bg = BG_PALETTE.get(pred_est, "#F8F9FA")
 
+                nota_extra = ''
+                if modo_inferencia == 'hibrido':
+                    nota_extra = (
+                        '<div style="margin-top:0.6rem;font-size:0.78rem;color:#64748B;'
+                        'border-top:1px solid #E2E8F0;padding-top:0.6rem">'
+                        'Nota: El modo Hibrido evalua como la condicion academica previa '
+                        '(ej. PAP/PAT) condiciona las probabilidades de transicion futuras '
+                        'junto con las metricas cuantitativas.'
+                        '</div>'
+                    )
+
                 st.markdown(f"""
                 <div class="prediction-result-box" style="border-color:{color};background:{bg}">
                     <div class="pred-label">El estudiante avanzara a</div>
@@ -572,14 +654,16 @@ with tab1:
                     <div class="pred-conf" style="color:{color}">
                         Confianza del modelo: {best_prob * 100:.1f}%
                     </div>
+                    {nota_extra}
                 </div>
                 """, unsafe_allow_html=True)
 
             st.markdown("#### Resumen de la prediccion")
             resumen_data = [("Campo", "Valor")]
-            resumen_data.append(("Modo", modo))
-            if es_whatif:
+            resumen_data.append(("Modo", label_modo))
+            if modo_inferencia in ('hibrido', 'automata'):
                 resumen_data.append(("Estado actual del estudiante", estado))
+            if modo_inferencia == 'automata':
                 resumen_data.append(("Transicion simulada",
                     "Todas las posibles" if whatif_trans == "Todas las transiciones posibles"
                     else f"{whatif_trans} -- {TRANS_DESCRIPCIONES.get(whatif_trans, '')}"))
@@ -620,21 +704,23 @@ with tab1:
                 st.metric("Accion recomendada", rec)
 
             probas_to_show = (
-                escenarios[0] if es_whatif and whatif_trans != "Todas las transiciones posibles"
+                escenarios[0] if modo_inferencia == 'automata' and whatif_trans != "Todas las transiciones posibles"
+                else modelo_obj if modo_inferencia != 'automata'
                 else None
             )
-            if probas_to_show:
+            if isinstance(probas_to_show, dict) and probas_to_show:
                 _, probas_full = predict_individual(
                     model_a, meta_a, estado, whatif_trans,
                     ppa_val, cursos, creditos, orden, programa,
-                    con_automata=True,
+                    modo='automata',
                 )
                 probas_full = aplicar_guardrails(probas_full, ppa_val, cursos, creditos)
-            elif not es_whatif:
+            elif probas_to_show is not None or modo_inferencia != 'automata':
                 _, probas_full = predict_individual(
-                    model_n, meta_n, None, None,
+                    modelo_obj, meta_obj,
+                    estado, None,
                     ppa_val, cursos, creditos, orden, programa,
-                    con_automata=False,
+                    modo=modo_inferencia,
                 )
                 probas_full = aplicar_guardrails(probas_full, ppa_val, cursos, creditos)
             else:
@@ -689,13 +775,19 @@ with tab2:
     modelo_sel_b = st.radio(
         "Modo de prediccion",
         ["Prediccion real (Modelo Numerico)",
+         "Prediccion Hibrida (Modelo Hibrido)",
          "Simulacion What-If (Modelo Automata)"],
         horizontal=True,
         key="tab2_modo",
     )
-    es_whatif_b = modelo_sel_b.startswith("Simulacion")
+    if modelo_sel_b.startswith("Simulacion"):
+        modo_b = 'automata'
+    elif modelo_sel_b.startswith("Prediccion Hibrida"):
+        modo_b = 'hibrido'
+    else:
+        modo_b = 'numerico'
 
-    if es_whatif_b:
+    if modo_b == 'automata':
         st.markdown("""
         <div style="background:#F0F7FF;border:1px solid #BFDBFE;border-radius:12px;
         padding:1rem 1.3rem;margin-bottom:1.3rem;font-size:0.88rem;color:#1E40AF">
@@ -704,6 +796,17 @@ with tab2:
         <code>PROMEDIO_ACUMULADO</code>, <code>CREDITOS_APROVADOS</code>,
         <code>NRO_CURSOS_APROBADOS</code>.
         Opcional: <code>PROGRAMA</code>, <code>PERIODO</code>, <code>ID</code>, <code>ESTADO_CONSECUENTE</code>.
+        </div>
+        """, unsafe_allow_html=True)
+    elif modo_b == 'hibrido':
+        st.markdown("""
+        <div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:12px;
+        padding:1rem 1.3rem;margin-bottom:1.3rem;font-size:0.88rem;color:#9A3412">
+        <strong>Formato del CSV/Excel (Prediccion Hibrida):</strong> debe contener las columnas
+        <code>ESTADO_AUTOMATA</code>, <code>PROMEDIO_ACUMULADO</code>, <code>CREDITOS_APROVADOS</code>,
+        <code>NRO_CURSOS_APROBADOS</code>.
+        Opcional: <code>PROGRAMA</code>, <code>PERIODO</code>, <code>ID</code>, <code>ESTADO_CONSECUENTE</code>.
+        NO necesita <code>TRANSICION_AUTOMATA</code>.
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -732,19 +835,34 @@ with tab2:
                     df_up = pd.read_csv(uploaded, encoding="utf-8-sig")
                 except Exception:
                     df_up = pd.read_csv(uploaded, encoding="latin-1")
+        df_up = normalize_columns(df_up)
 
         required_base = {'PROMEDIO_ACUMULADO', 'CREDITOS_APROVADOS', 'NRO_CURSOS_APROBADOS'}
-        if es_whatif_b:
+        if modo_b == 'automata':
             required_base |= {'ESTADO_AUTOMATA', 'TRANSICION_AUTOMATA'}
+        elif modo_b == 'hibrido':
+            required_base |= {'ESTADO_AUTOMATA'}
         missing = required_base - set(df_up.columns)
         if missing:
-            st.error(f"Faltan columnas: {', '.join(missing)}")
+            st.error(f"Faltan columnas requeridas: {', '.join(missing)}. "
+                     "Verifica que el archivo incluya las columnas necesarias "
+                     "(con cualquier nomenclatura: mayusculas/minusculas, "
+                     "espacios o guiones bajos).")
             st.stop()
 
+        st.caption("Nombres de columnas normalizados automaticamente")
+
         with st.spinner("Generando predicciones..."):
-            modelo_obj = model_a if es_whatif_b else model_n
-            meta_obj = meta_a if es_whatif_b else meta_n
-            preds = predict_batch(modelo_obj, meta_obj, df_up, con_automata=es_whatif_b)
+            if modo_b == 'automata':
+                modelo_obj_b = model_a
+                meta_obj_b = meta_a
+            elif modo_b == 'hibrido':
+                modelo_obj_b = model_h
+                meta_obj_b = meta_h
+            else:
+                modelo_obj_b = model_n
+                meta_obj_b = meta_n
+            preds = predict_batch(modelo_obj_b, meta_obj_b, df_up, modo=modo_b)
 
         df_up['PREDICCION_XGB'] = preds.values
         has_target = 'ESTADO_CONSECUENTE' in df_up.columns
@@ -938,7 +1056,8 @@ with tab3:
     <strong>Comparacion de modelos:</strong> el modelo <em>Automata</em> recibe OHE de
     <code>ESTADO_AUTOMATA</code> + <code>TRANSICION_AUTOMATA</code> como features, lo cual
     equivale a una tabla de lookup del automata determinista (resultados ~100%).
-    El modelo <em>Numerico</em> predice SOLO con datos academicos (PPA, creditos, cursos),
+    El modelo <em>Hibrido</em> incluye OHE del estado actual (sin transicion), combinado con
+    datos numericos. El modelo <em>Numerico</em> predice SOLO con datos academicos (PPA, creditos, cursos),
     sin knowledge del automata — resultados mas realistas y representativos.
     </div>
     """, unsafe_allow_html=True)
@@ -946,7 +1065,7 @@ with tab3:
     # ── Comparacion lado a lado ──
     st.markdown('<div class="section-title">Comparacion lado a lado</div>', unsafe_allow_html=True)
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(f"""
         <div style="background:#FEF2F2;border:2px solid #EF4444;border-radius:12px;padding:1.2rem;text-align:center">
@@ -965,6 +1084,22 @@ with tab3:
         """, unsafe_allow_html=True)
     with c2:
         st.markdown(f"""
+        <div style="background:#FFF7ED;border:2px solid #F59E0B;border-radius:12px;padding:1.2rem;text-align:center">
+            <div style="font-size:0.75rem;text-transform:uppercase;font-weight:700;color:#92400E;letter-spacing:0.05em">
+                Modelo HIBRIDO (estado + numerico)
+            </div>
+            <div style="font-size:2.2rem;font-weight:900;color:#D97706;margin:0.3rem 0">
+                {cv_h['f1_macro_mean']:.4f}
+            </div>
+            <div style="font-size:0.8rem;color:#92400E">
+                F1-Macro +/- {cv_h['f1_macro_std']:.4f}<br>
+                Accuracy: {cv_h['accuracy_mean']:.4f}<br>
+                Features: {len(meta_h['feature_names'])}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
         <div style="background:#F0FDF4;border:2px solid #22C55E;border-radius:12px;padding:1.2rem;text-align:center">
             <div style="font-size:0.75rem;text-transform:uppercase;font-weight:700;color:#166534;letter-spacing:0.05em">
                 Modelo NUMERICO (sin leakage)
@@ -980,12 +1115,15 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
 
-    gap = cv_a['f1_macro_mean'] - cv_n['f1_macro_mean']
+    gap_auto_num = cv_a['f1_macro_mean'] - cv_n['f1_macro_mean']
+    gap_hib_num = cv_h['f1_macro_mean'] - cv_n['f1_macro_mean']
+    gap_auto_hib = cv_a['f1_macro_mean'] - cv_h['f1_macro_mean']
     st.markdown(f"""
     <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;
     padding:0.8rem 1.2rem;margin:0.8rem 0;font-size:0.9rem;text-align:center">
-    <strong>Gap:</strong> {gap:.4f} — representa la informacion que aporta el
-    conocimiento del automata (estado + transicion) vs. solo datos academicos.
+    <strong>Gaps:</strong> Auto - Num = {gap_auto_num:.4f} · Hib - Num = {gap_hib_num:.4f} ·
+    Auto - Hib = {gap_auto_hib:.4f} — representan la informacion que aporta cada
+    conjunto de features (automata completo, solo estado, o solo numerico).
     </div>
     """, unsafe_allow_html=True)
 
@@ -1004,15 +1142,17 @@ with tab3:
 
         Esto NO es overfitting — es **data leakage por disenio**. Las features contienen la respuesta.
         El modelo Numerico resuelve esto al predecir solo con datos academicos reales.
+        El modelo Hibrido (estado sin transicion) reduce parcialmente el leakage.
         """)
 
-    tab_auto, tab_num = st.tabs(["Modelo Automata", "Modelo Numerico"])
+    tab_auto, tab_hib, tab_num = st.tabs(["Modelo Automata", "Modelo Hibrido", "Modelo Numerico"])
 
     for label, meta_tab, dir_out in [
         ("Automata", meta_a, 'outputs'),
+        ("Hibrido", meta_h, 'outputs/hibrido'),
         ("Numerico", meta_n, 'outputs/numerico'),
     ]:
-        tab = tab_auto if label == "Automata" else tab_num
+        tab = {'Automata': tab_auto, 'Hibrido': tab_hib, 'Numerico': tab_num}[label]
         cv_tab = meta_tab['cv_summary']
 
         with tab:
@@ -1139,8 +1279,9 @@ with tab3:
                     plt.close(fig_cr)
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Sidebar (informacion restante) ──────────────────────────────────────────
 with st.sidebar:
+    st.markdown("---")
     st.markdown("### Sobre los modos")
     st.markdown(f"""
     **Modelo Predictivo de Trayectorias Academicas**
@@ -1151,8 +1292,13 @@ with st.sidebar:
     - 37 features (incluye OHE estado+transicion)
     - Referencia: replica el automata (~100%)
 
-    **Prediccion real (Numerico)**
-    - F1-Macro: {cv_n['f1_macro_mean']:.4f} (realista)
+    **Prediccion Hibrida (Numerico + Estado)**
+    - F1-Macro: {cv_h['f1_macro_mean']:.4f}
+    - 23 features (8 num + 2 bool + 13 OHE estado)
+    - Activar checkbox "Incluir Estado Actual" en modo Real
+
+    **Prediccion real (Numerico Puro)**
+    - F1-Macro: {cv_n['f1_macro_mean']:.4f}
     - 9 features (solo datos academicos)
     - Sin knowledge del automata
 

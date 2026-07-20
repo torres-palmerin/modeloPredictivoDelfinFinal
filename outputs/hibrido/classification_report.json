@@ -1,0 +1,87 @@
+{
+  "Aspirante inscrito": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 55.0
+  },
+  "Continuo regular": {
+    "precision": 0.9728417087917534,
+    "recall": 0.887994209716819,
+    "f1-score": 0.9284835871724529,
+    "support": 11053.0
+  },
+  "Exclusión": {
+    "precision": 0.9217391304347826,
+    "recall": 1.0,
+    "f1-score": 0.9592760180995475,
+    "support": 106.0
+  },
+  "Grado": {
+    "precision": 0.9956302521008403,
+    "recall": 0.990304246071548,
+    "f1-score": 0.9929601072745559,
+    "support": 2991.0
+  },
+  "PAP": {
+    "precision": 0.48273844353423057,
+    "recall": 0.8225324027916251,
+    "f1-score": 0.6084070796460177,
+    "support": 1003.0
+  },
+  "PAT": {
+    "precision": 0.5451505016722408,
+    "recall": 0.9760479041916168,
+    "f1-score": 0.6995708154506438,
+    "support": 334.0
+  },
+  "PFU": {
+    "precision": 0.9097560975609756,
+    "recall": 0.6144975288303131,
+    "f1-score": 0.7335299901671584,
+    "support": 607.0
+  },
+  "Primera vez en una carrera": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1-score": 1.0,
+    "support": 2745.0
+  },
+  "Recuperación académica": {
+    "precision": 0.6176470588235294,
+    "recall": 0.9921259842519685,
+    "f1-score": 0.7613293051359517,
+    "support": 127.0
+  },
+  "Reingreso": {
+    "precision": 0.9719626168224299,
+    "recall": 0.9585253456221198,
+    "f1-score": 0.9651972157772621,
+    "support": 217.0
+  },
+  "Reinicio": {
+    "precision": 0.9156626506024096,
+    "recall": 0.9047619047619048,
+    "f1-score": 0.9101796407185628,
+    "support": 84.0
+  },
+  "Transferencia interna": {
+    "precision": 0.3948497854077253,
+    "recall": 0.8518518518518519,
+    "f1-score": 0.5395894428152492,
+    "support": 108.0
+  },
+  "accuracy": 0.9114256304683479,
+  "macro avg": {
+    "precision": 0.8106648538125764,
+    "recall": 0.9165534481741472,
+    "f1-score": 0.8415436001881167,
+    "support": 19430.0
+  },
+  "weighted avg": {
+    "precision": 0.9395707267407883,
+    "recall": 0.9114256304683479,
+    "f1-score": 0.9194114797885306,
+    "support": 19430.0
+  }
+}
